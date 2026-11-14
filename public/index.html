@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+  <head>
+    <meta charset="UTF-8" />
+    <title>AI Code Analyzer</title>
+
+    <style>
+      body {
+        font-family: Tahoma, sans-serif;
+        padding: 30px;
+        background: #f1f5f9;
+      }
+
+      textarea {
+        width: 100%;
+        height: 250px;
+        padding: 12px;
+        direction: ltr;
+        text-align: left;
+        font-family: monospace;
+        font-size: 15px;
+      }
+
+      button {
+        padding: 12px 25px;
+        margin-top: 15px;
+        cursor: pointer;
+        background: #2563eb;
+        color: white;
+        border: none;
+      }
+
+      pre {
+        background: white;
+        padding: 15px;
+        white-space: pre-wrap;
+        direction: rtl;
+      }
+    </style>
+  </head>
+
+  <body>
+    <h2>AI Code Analyzer</h2>
+
+    <p>کد JavaScript خود را وارد کنید:</p>
+
+    <textarea
+      id="codeInput"
+      placeholder="Write your JavaScript code here..."
+    ></textarea>
+
+    <br />
+
+    <button id="analyzeBtn">Analyze Code</button>
+
+    <h3>نتیجه:</h3>
+
+    <pre id="result">هنوز کدی تحلیل نشده است.</pre>
+
+    <script>
+      const button = document.getElementById("analyzeBtn");
+      const codeInput = document.getElementById("codeInput");
+      const result = document.getElementById("result");
+
+      button.addEventListener("click", async () => {
+        const code = codeInput.value;
+
+        if (!code.trim()) {
+          result.textContent = "لطفاً کد وارد کنید.";
+          return;
+        }
+
+        result.textContent = "در حال تحلیل کد...";
+
+        try {
+          const response = await fetch("/analyze", {
+            method: "POST",
+
+            headers: {
+              "Content-Type": "application/json",
+            },
+
+            body: JSON.stringify({ code }),
+          });
+
+          const data = await response.json();
+
+          if (!response.ok) {
+            throw new Error(data.error || "Server Error");
+          }
+
+          const lines = [];
+
+          // بررسی لغوی
+          if (data.lexical.valid) {
+            lines.push("✅ Lexical: No Error");
+          } else {
+            lines.push("❌ Lexical Error:");
+            lines.push(data.lexical.error.message);
+          }
+
+          // بررسی نحوی
+          if (data.syntax.checked) {
+            if (data.syntax.valid) {
+              lines.push("\n✅ Syntax: No Error");
+            } else {
+              lines.push("\n❌ Syntax Error:");
+              lines.push(data.syntax.error.message);
+            }
+          } else {
+            lines.push("\nSyntax analysis skipped");
+          }
+
+          // بررسی معنایی
+          if (data.semantic.checked) {
+            lines.push("\n===== SEMANTIC ANALYSIS =====");
+
+            if (data.semantic.diagnostics.length === 0) {
+              lines.push("✅ No semantic warnings or errors");
+            } else {
+              data.semantic.diagnostics.forEach((item) => {
+                lines.push(`\n${item.severity.toUpperCase()} - ${item.ruleId}`);
+
+                lines.push(item.message);
+
+                lines.push(`Line: ${item.line}, Column: ${item.column}`);
+              });
+            }
+          } else {
+            lines.push("\nSemantic analysis skipped");
+          }
+
+          // تحلیل هوش مصنوعی
+          lines.push("\n===== QWEN AI ANALYSIS =====");
+
+          if (data.ai?.checked) {
+            lines.push(data.ai.summary);
+
+            data.ai.findings.forEach((item) => {
+              lines.push(`\n${item.title}`);
+
+              lines.push(`Category: ${item.category}`);
+
+              lines.push(`Line: ${item.line ?? "Unknown"}`);
+
+              lines.push(`Explanation: ${item.explanation}`);
+
+              lines.push(`Suggestion: ${item.suggestion}`);
+            });
+
+            if (data.ai.cautions) {
+              lines.push(`\nNote: ${data.ai.cautions}`);
+            }
+          } else {
+            lines.push(data.ai?.message || "AI analysis unavailable");
+          }
+
+          result.textContent = lines.join("\n");
+        } catch (error) {
+          result.textContent = "Error: " + error.message;
+        }
+      });
+    </script>
+  </body>
+</html>
