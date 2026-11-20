@@ -53,11 +53,150 @@
 
     <button id="analyzeBtn">Analyze Code</button>
 
+    <button id="fixBtn">Auto Fix Code</button>
+
     <h3>نتیجه:</h3>
+
+    <h3>کد اصلاح‌شده:</h3>
+
+    <textarea
+      id="fixedCodeOutput"
+      placeholder="Fixed code will appear here..."
+      readonly
+    ></textarea>
+
+    <br />
+
+    <button id="applyFixBtn" disabled>Apply Fix</button>
 
     <pre id="result">هنوز کدی تحلیل نشده است.</pre>
 
     <script>
+      const fixButton = document.getElementById("fixBtn");
+
+      const fixedCodeOutput = document.getElementById("fixedCodeOutput");
+
+      const applyFixButton = document.getElementById("applyFixBtn");
+
+      let pendingFixedCode = null;
+
+      // درخواست اصلاح خودکار
+      fixButton.addEventListener("click", async () => {
+        const code = codeInput.value;
+
+        if (!code.trim()) {
+          result.textContent = "لطفاً کد وارد کنید.";
+
+          return;
+        }
+
+        fixButton.disabled = true;
+
+        applyFixButton.disabled = true;
+
+        fixedCodeOutput.value = "";
+
+        result.textContent = "در حال اصلاح کد با Qwen...";
+
+        try {
+          const response = await fetch("/fix", {
+            method: "POST",
+
+            headers: {
+              "Content-Type": "application/json",
+            },
+
+            body: JSON.stringify({
+              code: code,
+            }),
+          });
+
+          const data = await response.json();
+
+          if (!response.ok) {
+            throw new Error(data.details || data.error || "Fix failed");
+          }
+
+          // نگهداری نسخه پیشنهادی
+          pendingFixedCode = data.fixedCode;
+
+          // نمایش کد اصلاح شده
+          fixedCodeOutput.value = data.fixedCode;
+
+          // فعال کردن دکمه Apply فقط در صورت تغییر
+          applyFixButton.disabled = !data.changed;
+
+          // گزارش اصلاحات
+          const report = [];
+
+          report.push("===== AUTO FIX REPORT =====");
+
+          report.push(`ESLint changed code: ${data.eslintChanged}`);
+
+          report.push(`Code changed: ${data.changed}`);
+
+          report.push(`Candidate accepted: ${data.candidateAccepted}`);
+
+          report.push("\n===== QWEN SUMMARY =====");
+
+          report.push(data.ai.summary);
+
+          report.push("\n===== CHANGES =====");
+
+          if (data.ai.changes.length === 0) {
+            report.push("No changes reported.");
+          } else {
+            data.ai.changes.forEach((item, index) => {
+              report.push(`${index + 1}. ${item}`);
+            });
+          }
+
+          report.push("\n===== VALIDATION =====");
+
+          report.push(`Lexical: ${data.validation.lexical}`);
+
+          report.push(`Syntax: ${data.validation.syntax}`);
+
+          report.push(`Semantic: ${data.validation.semantic}`);
+
+          if (data.ai.needsReview) {
+            report.push("\n⚠️ Some changes need manual review.");
+          }
+
+          if (data.validation.remainingDiagnostics.length > 0) {
+            report.push("\n===== REMAINING ISSUES =====");
+
+            data.validation.remainingDiagnostics.forEach((item) => {
+              report.push(`${item.severity}: ${item.message}`);
+            });
+          }
+
+          result.textContent = report.join("\n");
+        } catch (error) {
+          result.textContent = "Fix Error: " + error.message;
+        } finally {
+          fixButton.disabled = false;
+        }
+      });
+
+      // جایگزینی کد اصلی با نسخه اصلاح شده
+      applyFixButton.addEventListener("click", () => {
+        if (pendingFixedCode === null) {
+          return;
+        }
+
+        codeInput.value = pendingFixedCode;
+
+        result.textContent =
+          "✅ نسخه اصلاح شده با تأیید شما جایگزین کد اصلی شد.";
+
+        pendingFixedCode = null;
+
+        applyFixButton.disabled = true;
+      });
+      
+      ///
+
       const button = document.getElementById("analyzeBtn");
       const codeInput = document.getElementById("codeInput");
       const result = document.getElementById("result");
