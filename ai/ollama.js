@@ -1,36 +1,27 @@
+const OLLAMA_URL = process.env.OLLAMA_BASE_URL || "http://127.0.0.1:11434";
 
-const OLLAMA_URL =
-    process.env.OLLAMA_BASE_URL || "http://127.0.0.1:11434";
-
-const OLLAMA_MODEL =
-    process.env.OLLAMA_MODEL || "qwen2.5-coder:3b";
-
+const OLLAMA_MODEL = process.env.OLLAMA_MODEL || "qwen2.5-coder:3b";
 
 export async function explainCode(code, diagnostics = []) {
+  let response;
 
-    let response;
+  // ارسال درخواست به مدل محلی
+  try {
+    response = await fetch(`${OLLAMA_URL}/api/chat`, {
+      method: "POST",
 
-    // ارسال درخواست به مدل محلی
-    try {
+      headers: {
+        "Content-Type": "application/json",
+      },
 
-        response = await fetch(
-            `${OLLAMA_URL}/api/chat`,
-            {
-                method: "POST",
+      body: JSON.stringify({
+        model: OLLAMA_MODEL,
 
-                headers: {
-                    "Content-Type": "application/json"
-                },
+        messages: [
+          {
+            role: "system",
 
-                body: JSON.stringify({
-
-                    model: OLLAMA_MODEL,
-
-                    messages: [
-                        {
-                            role: "system",
-
-                            content: `
+            content: `
 You are an expert JavaScript code analyzer.
 
 Analyze JavaScript code and explain programming errors.
@@ -66,124 +57,91 @@ Return only valid JSON using this structure:
 }
 
 If no problems are found, return an empty findings array.
-`
-                        },
+`,
+          },
 
-                        {
-                            role: "user",
+          {
+            role: "user",
 
-                            content: JSON.stringify({
-                                code: code,
-                                eslintDiagnostics: diagnostics
-                            })
-                        }
-                    ],
+            content: JSON.stringify({
+              code: code,
+              eslintDiagnostics: diagnostics,
+            }),
+          },
+        ],
 
-                    // دریافت پاسخ کامل به صورت یکجا
-                    stream: false,
+        // دریافت پاسخ کامل به صورت یکجا
+        stream: false,
 
-                    // اجبار مدل به تولید JSON
-                    format: "json",
+        // اجبار مدل به تولید JSON
+        format: "json",
 
-                    options: {
-                        temperature: 0.2
-                    }
-                }),
+        options: {
+          temperature: 0.2,
+        },
+      }),
 
-                signal: AbortSignal.timeout(180000)
-            }
-        );
-
-    } catch (error) {
-
-        if (
-            error.name === "TimeoutError" ||
-            error.name === "AbortError"
-        ) {
-            throw new Error(
-                "زمان پاسخ Ollama بیش از حد طول کشید."
-            );
-        }
-
-        throw new Error(
-            "ارتباط با Ollama برقرار نشد. " +
-            "مطمئن شو برنامه Ollama در حال اجرا است."
-        );
+      signal: AbortSignal.timeout(180000),
+    });
+  } catch (error) {
+    if (error.name === "TimeoutError" || error.name === "AbortError") {
+      throw new Error("زمان پاسخ Ollama بیش از حد طول کشید.");
     }
 
+    throw new Error(
+      "ارتباط با Ollama برقرار نشد. " +
+        "مطمئن شو برنامه Ollama در حال اجرا است.",
+    );
+  }
 
-    // دریافت پاسخ خام
-    const rawBody = await response.text();
+  // دریافت پاسخ خام
+  const rawBody = await response.text();
 
-    let data;
+  let data;
 
-    try {
+  try {
+    data = JSON.parse(rawBody);
+  } catch {
+    throw new Error("پاسخ Ollama فرمت JSON معتبر ندارد.");
+  }
 
-        data = JSON.parse(rawBody);
+  // بررسی خطای API
+  if (!response.ok) {
+    const message = data.error || "Unknown Ollama error";
 
-    } catch {
-
-        throw new Error(
-            "پاسخ Ollama فرمت JSON معتبر ندارد."
-        );
+    if (response.status === 404) {
+      throw new Error(
+        `مدل ${OLLAMA_MODEL} پیدا نشد. ابتدا آن را با دستور ollama pull دانلود کن.`,
+      );
     }
 
+    throw new Error(`Ollama Error ${response.status}: ${message}`);
+  }
 
-    // بررسی خطای API
-    if (!response.ok) {
+  // استخراج پاسخ مدل
+  const rawContent = data.message?.content;
 
-        const message = data.error || "Unknown Ollama error";
+  if (!rawContent) {
+    throw new Error("مدل پاسخ متنی تولید نکرد.");
+  }
 
-        if (response.status === 404) {
+  // تبدیل پاسخ مدل به JSON
+  let result;
 
-            throw new Error(
-                `مدل ${OLLAMA_MODEL} پیدا نشد. ابتدا آن را با دستور ollama pull دانلود کن.`
-            );
-        }
+  try {
+    result = JSON.parse(rawContent);
+  } catch {
+    throw new Error("پاسخ مدل JSON معتبر نیست.");
+  }
 
-        throw new Error(
-            `Ollama Error ${response.status}: ${message}`
-        );
-    }
+  // ساخت خروجی استاندارد برای Frontend
+  return {
+    checked: true,
 
+    summary: result.summary || "",
 
-    // استخراج پاسخ مدل
-    const rawContent = data.message?.content;
+    findings: Array.isArray(result.findings) ? result.findings : [],
 
-    if (!rawContent) {
-
-        throw new Error(
-            "مدل پاسخ متنی تولید نکرد."
-        );
-    }
-
-
-    // تبدیل پاسخ مدل به JSON
-    let result;
-
-    try {
-
-        result = JSON.parse(rawContent);
-
-    } catch {
-
-        throw new Error(
-            "پاسخ مدل JSON معتبر نیست."
-        );
-    }
-
-
-    // ساخت خروجی استاندارد برای Frontend
-    return {
-
-        checked: true,
-
-        summary: result.summary || "",
-
-        findings: Array.isArray(result.findings)
-            ? result.findings
-            : [],
-
-        cautions: result.cautions || ""
-    };
+    cautions: result.cautions || "",
+  };
 }

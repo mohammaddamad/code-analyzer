@@ -1,92 +1,69 @@
+const OLLAMA_URL = process.env.OLLAMA_BASE_URL || "http://127.0.0.1:11434";
 
-const OLLAMA_URL =
-    process.env.OLLAMA_BASE_URL || "http://127.0.0.1:11434";
-
-const OLLAMA_MODEL =
-    process.env.OLLAMA_MODEL || "qwen2.5-coder:7b";
-
+const OLLAMA_MODEL = process.env.OLLAMA_MODEL || "qwen2.5-coder:7b";
 
 // ساختار پاسخ مورد انتظار از Qwen
 const repairSchema = {
+  type: "object",
 
-    type: "object",
-
-    properties: {
-
-        fixedCode: {
-            type: "string"
-        },
-
-        summary: {
-            type: "string"
-        },
-
-        changes: {
-            type: "array",
-            items: {
-                type: "string"
-            }
-        },
-
-        needsReview: {
-            type: "boolean"
-        }
+  properties: {
+    fixedCode: {
+      type: "string",
     },
 
-    required: [
-        "fixedCode",
-        "summary",
-        "changes",
-        "needsReview"
-    ],
+    summary: {
+      type: "string",
+    },
 
-    additionalProperties: false
+    changes: {
+      type: "array",
+      items: {
+        type: "string",
+      },
+    },
+
+    needsReview: {
+      type: "boolean",
+    },
+  },
+
+  required: ["fixedCode", "summary", "changes", "needsReview"],
+
+  additionalProperties: false,
 };
-
 
 // پاک کردن Markdown احتمالی از کد
 function cleanCode(code) {
-
-    return code
-        .replace(/^```(?:javascript|js)?\s*/i, "")
-        .replace(/\s*```$/, "");
+  return code.replace(/^```(?:javascript|js)?\s*/i, "").replace(/\s*```$/, "");
 }
 
-
 // درخواست اصلاح کد از Qwen
-export async function repairCodeWithOllama(
-    code,
-    diagnostics = []
-) {
+export async function repairCodeWithOllama(code, diagnostics = []) {
+  let response;
 
-    let response;
+  try {
+    response = await fetch(
+      `${OLLAMA_URL}/api/chat`,
 
-    try {
+      {
+        method: "POST",
 
-        response = await fetch(
-            `${OLLAMA_URL}/api/chat`,
+        headers: {
+          "Content-Type": "application/json",
+        },
 
+        body: JSON.stringify({
+          model: OLLAMA_MODEL,
+
+          stream: false,
+
+          format: repairSchema,
+
+          messages: [
             {
-                method: "POST",
+              role: "system",
 
-                headers: {
-                    "Content-Type": "application/json"
-                },
-
-                body: JSON.stringify({
-
-                    model: OLLAMA_MODEL,
-
-                    stream: false,
-
-                    format: repairSchema,
-
-                    messages: [
-
-                        {
-                            role: "system",
-
-                            content: `
+              content: `
 You are an expert JavaScript code repair assistant.
 
 Your task is to repair the submitted JavaScript code.
@@ -113,113 +90,82 @@ IMPORTANT:
 - If a correction is ambiguous, leave the code unchanged
   for that issue and set needsReview to true.
 - If no correction is needed, return the original code.
-`
-                        },
+`,
+            },
 
-                        {
-                            role: "user",
+            {
+              role: "user",
 
-                            content: JSON.stringify({
+              content: JSON.stringify({
+                sourceCode: code,
 
-                                sourceCode: code,
+                errorsAndWarnings: diagnostics,
+              }),
+            },
+          ],
 
-                                errorsAndWarnings: diagnostics
+          options: {
+            temperature: 0,
+          },
 
-                            })
-                        }
-                    ],
+          keep_alive: "5m",
+        }),
 
-                    options: {
-                        temperature: 0
-                    },
+        signal: AbortSignal.timeout(180000),
+      },
+    );
+  } catch (error) {
+    throw new Error(
+      "ارتباط با Ollama برای اصلاح کد برقرار نشد: " + error.message,
+    );
+  }
 
-                    keep_alive: "5m"
-                }),
+  // دریافت پاسخ
+  const responseText = await response.text();
 
-                signal: AbortSignal.timeout(180000)
-            }
-        );
+  let data;
 
-    } catch (error) {
+  try {
+    data = JSON.parse(responseText);
+  } catch {
+    throw new Error("پاسخ Ollama معتبر نیست.");
+  }
 
-        throw new Error(
-            "ارتباط با Ollama برای اصلاح کد برقرار نشد: " +
-            error.message
-        );
-    }
+  if (!response.ok) {
+    throw new Error(data.error || "Ollama repair failed.");
+  }
 
+  const content = data.message?.content;
 
-    // دریافت پاسخ
-    const responseText = await response.text();
+  if (!content) {
+    throw new Error("Qwen پاسخ اصلاح کد را تولید نکرد.");
+  }
 
-    let data;
+  // تبدیل پاسخ JSON به Object
+  let result;
 
-    try {
+  try {
+    result = JSON.parse(content);
+  } catch {
+    throw new Error("ساختار JSON پاسخ Qwen نامعتبر است.");
+  }
 
-        data = JSON.parse(responseText);
+  if (
+    typeof result.fixedCode !== "string" ||
+    typeof result.summary !== "string" ||
+    !Array.isArray(result.changes) ||
+    typeof result.needsReview !== "boolean"
+  ) {
+    throw new Error("ساختار خروجی اصلاح کد ناقص است.");
+  }
 
-    } catch {
+  return {
+    fixedCode: cleanCode(result.fixedCode),
 
-        throw new Error(
-            "پاسخ Ollama معتبر نیست."
-        );
-    }
+    summary: result.summary,
 
+    changes: result.changes,
 
-    if (!response.ok) {
-
-        throw new Error(
-            data.error || "Ollama repair failed."
-        );
-    }
-
-
-    const content = data.message?.content;
-
-    if (!content) {
-
-        throw new Error(
-            "Qwen پاسخ اصلاح کد را تولید نکرد."
-        );
-    }
-
-
-    // تبدیل پاسخ JSON به Object
-    let result;
-
-    try {
-
-        result = JSON.parse(content);
-
-    } catch {
-
-        throw new Error(
-            "ساختار JSON پاسخ Qwen نامعتبر است."
-        );
-    }
-
-
-    if (
-        typeof result.fixedCode !== "string" ||
-        typeof result.summary !== "string" ||
-        !Array.isArray(result.changes) ||
-        typeof result.needsReview !== "boolean"
-    ) {
-
-        throw new Error(
-            "ساختار خروجی اصلاح کد ناقص است."
-        );
-    }
-
-
-    return {
-
-        fixedCode: cleanCode(result.fixedCode),
-
-        summary: result.summary,
-
-        changes: result.changes,
-
-        needsReview: result.needsReview
-    };
+    needsReview: result.needsReview,
+  };
 }
