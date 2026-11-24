@@ -4,14 +4,14 @@ import express from "express";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { checkLexical } from "./analyzer/lexical.js";
-import { checkSyntax } from "./analyzer/syntax.js";
+import { checkLexical } from "./analyzer/lexical.js";//تشخیص خطاهای لغوی
+import { checkSyntax } from "./analyzer/syntax.js";//	تشخیص خطاهای نحوی
 
-import { autoFixSemantic, checkSemantic } from "./analyzer/semantic.js";
+import { autoFixSemantic, checkSemantic } from "./analyzer/semantic.js"; //تحلیل معنایی و اصلاح خودکار با ESLint
 
-import { repairCodeWithOllama } from "./ai/repair.js";
+import { repairCodeWithOllama } from "./ai/repair.js";//	اصلاح کد با Qwen
 
-import { explainCode } from "./ai/ollama.js";
+import { explainCode } from "./ai/ollama.js";//	توضیح خطاها با Qwen
 
 const app = express();
 const PORT = 3000;
@@ -25,10 +25,10 @@ app.use(express.json({ limit: "1mb" }));
 app.use(express.static(path.join(__dirname, "public")));
 
 // مسیر اصلی تحلیل کد
-app.post("/analyze", async (req, res) => {
+app.post("/analyze", async (req, res) => { //وقتی کاربر در صفحه روی دکمه Analyze Code کلیک می‌کند، Frontend کد را به این مسیر ارسال می‌کند
   const code = req.body?.code;
 
-  if (typeof code !== "string") {
+  if (typeof code !== "string") { //ممکن است کاربر به‌جای کد، اطلاعات نامعتبر ارسال کند
     return res.status(400).json({
       error: "Invalid code input",
     });
@@ -142,7 +142,7 @@ app.post("/fix", async (req, res) => {
     // 1. بررسی اولیه کد
     const initialLexical = checkLexical(code);
 
-    const initialSyntax = initialLexical.valid ? checkSyntax(code) : null;
+    const initialSyntax = initialLexical.valid ? checkSyntax(code) : null; //اگر خطای لغوی داشته باشد، بررسی نحوی انجام نمی‌شود و مقدار initialSyntax برابر null خواهد بود
 
     // 2. اصلاح خودکار با ESLint
     let baseCode = code;
@@ -154,12 +154,12 @@ app.post("/fix", async (req, res) => {
 
       baseCode = eslintResult.code;
 
-      eslintChanged = eslintResult.changed;
+      eslintChanged = eslintResult.changed; //اگر کد خطای لغوی یا نحوی داشته باشد، ESLint در این مرحله اجرا نمی‌شود؛ چون هنوز ساختار کد معتبر نیست
     }
 
     // 3. بررسی مجدد بعد از ESLint
     const currentLexical = checkLexical(baseCode);
-
+    //می‌خواهیم مطمئن شویم نسخه‌ای که برای Qwen ارسال می‌کنیم از نظر ساختاری قابل بررسی است
     const currentSyntax = currentLexical.valid ? checkSyntax(baseCode) : null;
 
     // 4. جمع آوری خطاها برای Qwen
@@ -192,7 +192,7 @@ app.post("/fix", async (req, res) => {
     // 6. بررسی کد تولیدشده توسط هوش مصنوعی
     const candidate = aiResult.fixedCode;
 
-    const candidateLexical = checkLexical(candidate);
+    const candidateLexical = checkLexical(candidate); // دوباره چک میکنیم که کد اصلاح شده ارور جدیدی دارد ؟
 
     const candidateSyntax = candidateLexical.valid
       ? checkSyntax(candidate)
@@ -250,18 +250,18 @@ app.post("/fix", async (req, res) => {
     return res.json({
       originalCode: code,
 
-      fixedCode: finalCode,
+      fixedCode: finalCode, //کد پیشنهادی اصلاح‌شده
 
-      changed: finalCode !== code,
+      changed: finalCode !== code, //	آیا کد تغییر کرده است
 
-      eslintChanged,
+      eslintChanged, // آیا ESLint تغییری ایجاد کرده است
 
       ai: {
-        summary: aiResult.summary,
+        summary: aiResult.summary, //خلاصه اصلاحات Qwen
 
         changes: aiResult.changes,
 
-        needsReview: aiResult.needsReview,
+        needsReview: aiResult.needsReview, //	آیا بازبینی دستی لازم است
       },
 
       validation: {
@@ -274,7 +274,7 @@ app.post("/fix", async (req, res) => {
         remainingDiagnostics: finalSemantic.diagnostics,
       },
 
-      candidateAccepted,
+      candidateAccepted, //آیا نسخه پیشنهادی Qwen پذیرفته شده است
     });
   } catch (error) {
     console.error("Code Fix Error:", error);
